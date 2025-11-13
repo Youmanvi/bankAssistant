@@ -22,8 +22,17 @@ type Config struct {
 	// Logging
 	LogLevel string
 
-	// Database (call state storage)
+	// Database - Call State Storage
 	CallStateDB string // "memory" or "redis"
+
+	// Database - PostgreSQL (for users, sessions, accounts)
+	DBDriver   string // "postgres"
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	DBSSLMode  string
 }
 
 // LoadConfig loads configuration from environment variables
@@ -32,12 +41,28 @@ func LoadConfig() *Config {
 	_ = godotenv.Load(".env")
 
 	return &Config{
-		Host:             getEnv("ORCHESTRATOR_HOST", "0.0.0.0"),
-		Port:             getEnv("ORCHESTRATOR_PORT", "8001"),
+		// Server
+		Host: getEnv("ORCHESTRATOR_HOST", "0.0.0.0"),
+		Port: getEnv("ORCHESTRATOR_PORT", "8001"),
+
+		// External Services
 		RetellAPIKey:     getEnv("RETELL_API_KEY", ""),
 		PythonBackendURL: getEnv("PYTHON_BACKEND_URL", "http://localhost:8000"),
-		LogLevel:         getEnv("LOG_LEVEL", "INFO"),
-		CallStateDB:      getEnv("CALL_STATE_DB", "memory"),
+
+		// Logging
+		LogLevel: getEnv("LOG_LEVEL", "INFO"),
+
+		// Database - Call State
+		CallStateDB: getEnv("CALL_STATE_DB", "memory"),
+
+		// Database - PostgreSQL
+		DBDriver:   getEnv("DB_DRIVER", "postgres"),
+		DBHost:     getEnv("DB_HOST", "localhost"),
+		DBPort:     getEnv("DB_PORT", "5432"),
+		DBUser:     getEnv("DB_USER", "bankassistant"),
+		DBPassword: getEnv("DB_PASSWORD", ""),
+		DBName:     getEnv("DB_NAME", "bankassistant"),
+		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 	}
 }
 

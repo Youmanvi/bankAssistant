@@ -13,10 +13,9 @@ import (
 
 // AuthService handles user authentication and session management
 type AuthService struct {
-	mu       sync.RWMutex
-	sessions map[string]*UserSession // token -> session
-	users    map[string]*AuthUser     // phone -> user
-	jwtKey   []byte
+	mu   sync.RWMutex
+	db   *Database
+	jwtKey []byte
 }
 
 // AuthUser represents a user for authentication
@@ -34,11 +33,10 @@ type AuthUser struct {
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService() *AuthService {
+func NewAuthService(db *Database) *AuthService {
 	return &AuthService{
-		sessions: make(map[string]*UserSession),
-		users:    make(map[string]*AuthUser),
-		jwtKey:   []byte("your-secret-key-change-in-production"),
+		db:     db,
+		jwtKey: []byte("your-secret-key-change-in-production"),
 	}
 }
 
@@ -48,11 +46,9 @@ func NewAuthService() *AuthService {
 
 // Login authenticates a user and generates a token
 func (as *AuthService) Login(phone, pin string) (*AuthResponse, error) {
-	as.mu.RLock()
-	user, exists := as.users[phone]
-	as.mu.RUnlock()
-
-	if !exists {
+	// Get user from database
+	user, err := as.db.GetUserByPhone(phone)
+	if err != nil {
 		return &AuthResponse{
 			Success: false,
 			Message: "User not found",
@@ -83,9 +79,13 @@ func (as *AuthService) Login(phone, pin string) (*AuthResponse, error) {
 		ExpiresAt: expiresAt,
 	}
 
-	as.mu.Lock()
-	as.sessions[token] = session
-	as.mu.Unlock()
+	// Store session in database
+	if err := as.db.CreateSession(session); err != nil {
+		return &AuthResponse{
+			Success: false,
+			Message: "Failed to create session",
+		}, fmt.Errorf("failed to create session: %w", err)
+	}
 
 	log.Printf("User logged in: %s (%s)", user.Name, phone)
 
@@ -100,37 +100,45 @@ func (as *AuthService) Login(phone, pin string) (*AuthResponse, error) {
 
 // ValidateToken verifies a token and returns the session
 func (as *AuthService) ValidateToken(token string) (*UserSession, error) {
-	as.mu.RLock()
-	session, exists := as.sessions[token]
-	as.mu.RUnlock()
-
-	if !exists {
+	// Get session from database
+	session, err := as.db.GetSessionByToken(token)
+	if err != nil {
 		return nil, fmt.Errorf("token not found")
 	}
 
 	// Check expiration
 	if time.Now().Unix() > session.ExpiresAt {
-		as.mu.Lock()
-		delete(as.sessions, token)
-		as.mu.Unlock()
+		as.db.DeleteSession(token)
 		return nil, fmt.Errorf("token expired")
 	}
+
+	// Fetch user info to populate session fields
+	user, err := as.db.GetUserByID(session.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	session.Phone = user.Phone
+	session.Name = user.Name
 
 	return session, nil
 }
 
 // Logout revokes a token
 func (as *AuthService) Logout(token string) error {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-
-	if session, exists := as.sessions[token]; exists {
-		delete(as.sessions, token)
-		log.Printf("User logged out: %s", session.Phone)
-		return nil
+	// Get session to log user info
+	session, err := as.db.GetSessionByToken(token)
+	if err != nil {
+		return fmt.Errorf("token not found")
 	}
 
-	return fmt.Errorf("token not found")
+	// Delete session from database
+	if err := as.db.DeleteSession(token); err != nil {
+		return err
+	}
+
+	log.Printf("User logged out: %s", session.UserID)
+	return nil
 }
 
 // ============================================================================
@@ -139,11 +147,9 @@ func (as *AuthService) Logout(token string) error {
 
 // RegisterUser creates a new user with initial sample data
 func (as *AuthService) RegisterUser(phone, pin, name, email string) (*UserSeedResponse, error) {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-
 	// Check if user already exists
-	if _, exists := as.users[phone]; exists {
+	_, err := as.db.GetUserByPhone(phone)
+	if err == nil {
 		return &UserSeedResponse{
 			Success: false,
 			Message: "User already exists",
@@ -167,43 +173,66 @@ func (as *AuthService) RegisterUser(phone, pin, name, email string) (*UserSeedRe
 		CreatedAt:   time.Now().Unix(),
 	}
 
+	// Store user in database
+	if err := as.db.CreateUser(user); err != nil {
+		return &UserSeedResponse{
+			Success: false,
+			Message: "Failed to create user",
+		}, fmt.Errorf("failed to create user: %w", err)
+	}
+
 	// Create sample accounts with random data
 	accounts := []SampleAccountData{}
 
 	// Checking account
 	checkingID := fmt.Sprintf("checking_%s", randomString(6))
+	checkingBalance := generateBalance(1000, 10000)
 	user.Accounts = append(user.Accounts, checkingID)
+
+	if err := as.db.CreateAccount(checkingID, userID, "Checking", checkingBalance); err != nil {
+		log.Printf("Error creating checking account: %v", err)
+	}
+
 	accounts = append(accounts, SampleAccountData{
 		AccountID:    checkingID,
 		Type:         "Checking",
-		Balance:      generateBalance(1000, 10000),
+		Balance:      checkingBalance,
 		Transactions: randomInt(5, 20),
 	})
 
 	// Savings account
 	savingsID := fmt.Sprintf("savings_%s", randomString(6))
+	savingsBalance := generateBalance(5000, 50000)
 	user.Accounts = append(user.Accounts, savingsID)
+
+	if err := as.db.CreateAccount(savingsID, userID, "Savings", savingsBalance); err != nil {
+		log.Printf("Error creating savings account: %v", err)
+	}
+
 	accounts = append(accounts, SampleAccountData{
 		AccountID:    savingsID,
 		Type:         "Savings",
-		Balance:      generateBalance(5000, 50000),
+		Balance:      savingsBalance,
 		Transactions: randomInt(2, 10),
 	})
 
 	// Money Market account (optional)
 	if randomInt(0, 1) == 1 {
 		marketID := fmt.Sprintf("market_%s", randomString(6))
+		marketBalance := generateBalance(10000, 100000)
 		user.Accounts = append(user.Accounts, marketID)
+
+		if err := as.db.CreateAccount(marketID, userID, "Money Market", marketBalance); err != nil {
+			log.Printf("Error creating money market account: %v", err)
+		}
+
 		accounts = append(accounts, SampleAccountData{
 			AccountID:    marketID,
 			Type:         "Money Market",
-			Balance:      generateBalance(10000, 100000),
+			Balance:      marketBalance,
 			Transactions: randomInt(1, 5),
 		})
 	}
-
-	// Store user
-	as.users[phone] = user
 
 	log.Printf("New user registered: %s (%s) with %d accounts", name, phone, len(user.Accounts))
 
@@ -219,27 +248,16 @@ func (as *AuthService) RegisterUser(phone, pin, name, email string) (*UserSeedRe
 
 // GetUser retrieves user information by phone
 func (as *AuthService) GetUser(phone string) (*AuthUser, error) {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
-
-	user, exists := as.users[phone]
-	if !exists {
-		return nil, fmt.Errorf("user not found: %s", phone)
-	}
-
-	return user, nil
+	return as.db.GetUserByPhone(phone)
 }
 
 // ListUsers returns all registered users
 func (as *AuthService) ListUsers() []*AuthUser {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
-
-	users := make([]*AuthUser, 0, len(as.users))
-	for _, user := range as.users {
-		users = append(users, user)
+	users, err := as.db.ListAllUsers()
+	if err != nil {
+		log.Printf("Error listing users: %v", err)
+		return []*AuthUser{}
 	}
-
 	return users
 }
 

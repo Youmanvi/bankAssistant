@@ -19,10 +19,21 @@ type Orchestrator struct {
 
 // NewOrchestrator creates a new orchestrator instance
 func NewOrchestrator(config *Config) *Orchestrator {
+	// Initialize database
+	db, err := NewDatabase(config)
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// Initialize database schema
+	if err := db.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize database schema: %v", err)
+	}
+
 	stateMachine := NewCallStateMachine()
 	backendClient := NewPythonBackendClient(config.PythonBackendURL)
 	retellHandler := NewRetellHandler(stateMachine, backendClient, config.RetellAPIKey)
-	authService := NewAuthService()
+	authService := NewAuthService(db)
 
 	// Create sample users for demo
 	authService.CreateSampleUsers()

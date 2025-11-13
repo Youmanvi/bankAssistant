@@ -81,9 +81,48 @@ AWAITING_CALL (Clean up and reset)
 ### Prerequisites
 
 - **Go 1.21+** - [Download](https://golang.org/dl/)
+- **PostgreSQL 12+** - [Download](https://www.postgresql.org/download/)
 - **Python Backend** - Running on `http://localhost:8000`
 - **Retell AI Account** - For API key
 - **Environment Configuration** - `.env` file with API keys
+
+### Database Setup (PostgreSQL)
+
+The orchestrator uses PostgreSQL to store users, sessions, and accounts.
+
+**On macOS:**
+```bash
+# Install PostgreSQL
+brew install postgresql@15
+
+# Start PostgreSQL service
+brew services start postgresql@15
+
+# Create database and user
+psql -U postgres -f orchestrator/scripts_setup_db.sql
+```
+
+**On Ubuntu/Debian:**
+```bash
+# Install PostgreSQL
+sudo apt-get install postgresql postgresql-contrib
+
+# Start PostgreSQL service
+sudo systemctl start postgresql
+
+# Create database and user (as postgres user)
+sudo -u postgres psql -f orchestrator/scripts_setup_db.sql
+```
+
+**On Windows:**
+```bash
+# Download and install PostgreSQL from https://www.postgresql.org/download/windows/
+
+# Run setup script
+"C:\Program Files\PostgreSQL\15\bin\psql.exe" -U postgres -f orchestrator\scripts_setup_db.sql
+```
+
+**Note:** The application will automatically create all necessary tables on first run.
 
 ### Quick Start
 
@@ -93,17 +132,24 @@ cd orchestrator
 
 # 2. Create environment file
 cp .env.example .env
-# Edit .env with your API keys
 
-# 3. Download dependencies
+# 3. Update .env with your configuration
+# - Set Retell API key
+# - Set PostgreSQL password (should match the one in setup script)
+# - Configure other settings as needed
+
+# 4. Download dependencies
 go mod download
 
-# 4. Run the orchestrator
+# 5. Run the orchestrator
 go run .
 
 # Expected output:
-# 2024/01/15 10:30:45 Orchestrator starting on 0.0.0.0:8001
-# 2024/01/15 10:30:46 Python backend is healthy
+# Connected to PostgreSQL database: bankassistant
+# Database schema initialized successfully
+# Created 5 sample users
+# Orchestrator starting on 0.0.0.0:8001
+# Python backend is healthy
 ```
 
 ### Verify Installation
