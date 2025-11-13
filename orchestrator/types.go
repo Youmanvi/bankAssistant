@@ -170,6 +170,73 @@ type ApplicationStatusResponse struct {
 }
 
 // ============================================================================
+// Authentication Models
+// ============================================================================
+
+// AuthRequest represents a login request
+type AuthRequest struct {
+	Phone    string `json:"phone"`
+	PIN      string `json:"pin"`
+}
+
+// AuthResponse represents a login response
+type AuthResponse struct {
+	Success   bool   `json:"success"`
+	Token     string `json:"token"`
+	UserID    string `json:"user_id"`
+	Name      string `json:"name"`
+	Message   string `json:"message"`
+}
+
+// TokenClaims represents JWT token claims
+type TokenClaims struct {
+	UserID string `json:"user_id"`
+	Phone  string `json:"phone"`
+	Name   string `json:"name"`
+	Exp    int64  `json:"exp"`
+}
+
+// UserSession represents an authenticated user session
+type UserSession struct {
+	Token     string
+	UserID    string
+	Phone     string
+	Name      string
+	CreatedAt int64
+	ExpiresAt int64
+}
+
+// ============================================================================
+// Sample Data Generation Models
+// ============================================================================
+
+// UserSeedRequest represents a request to generate a test user with sample data
+type UserSeedRequest struct {
+	Phone  string `json:"phone"`
+	PIN    string `json:"pin"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+}
+
+// UserSeedResponse represents the response from user seed creation
+type UserSeedResponse struct {
+	Success   bool                 `json:"success"`
+	UserID    string               `json:"user_id"`
+	Phone     string               `json:"phone"`
+	Name      string               `json:"name"`
+	Accounts  []SampleAccountData  `json:"accounts"`
+	Message   string               `json:"message"`
+}
+
+// SampleAccountData represents account data for a test user
+type SampleAccountData struct {
+	AccountID  string  `json:"account_id"`
+	Type       string  `json:"type"`
+	Balance    float64 `json:"balance"`
+	Transactions int    `json:"transactions"`
+}
+
+// ============================================================================
 // HTTP Response Models
 // ============================================================================
 

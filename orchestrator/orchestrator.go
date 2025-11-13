@@ -13,6 +13,7 @@ type Orchestrator struct {
 	stateMachine     *CallStateMachine
 	backendClient    *PythonBackendClient
 	retellHandler    *RetellHandler
+	authService      *AuthService
 	httpServer       *http.Server
 }
 
@@ -21,12 +22,17 @@ func NewOrchestrator(config *Config) *Orchestrator {
 	stateMachine := NewCallStateMachine()
 	backendClient := NewPythonBackendClient(config.PythonBackendURL)
 	retellHandler := NewRetellHandler(stateMachine, backendClient, config.RetellAPIKey)
+	authService := NewAuthService()
+
+	// Create sample users for demo
+	authService.CreateSampleUsers()
 
 	return &Orchestrator{
 		config:        config,
-		stateMachine: stateMachine,
+		stateMachine:  stateMachine,
 		backendClient: backendClient,
 		retellHandler: retellHandler,
+		authService:   authService,
 	}
 }
 
@@ -81,6 +87,12 @@ func (o *Orchestrator) setupRoutes() {
 	// Health check
 	http.HandleFunc("/health", o.handleHealth)
 
+	// Authentication endpoints
+	http.HandleFunc("/auth/login", o.handleLogin)
+	http.HandleFunc("/auth/logout", o.handleLogout)
+	http.HandleFunc("/auth/register", o.handleRegister)
+	http.HandleFunc("/auth/users", o.handleListUsers)
+
 	// Retell AI webhook
 	http.HandleFunc("/webhook", o.retellHandler.HandleWebhook)
 
@@ -89,22 +101,22 @@ func (o *Orchestrator) setupRoutes() {
 	http.HandleFunc("/admin/call", o.retellHandler.GetCallStatus)
 
 	// Orchestration endpoints - User & Context
-	http.HandleFunc("/orchestrate/load-context", o.handleLoadContext)
-	http.HandleFunc("/orchestrate/get-user", o.handleGetUser)
-	http.HandleFunc("/orchestrate/get-user-profile", o.handleGetUserProfile)
-	http.HandleFunc("/orchestrate/get-accounts", o.handleGetAccounts)
+	http.HandleFunc("/orchestrate/load-context", o.withAuth(o.handleLoadContext))
+	http.HandleFunc("/orchestrate/get-user", o.withAuth(o.handleGetUser))
+	http.HandleFunc("/orchestrate/get-user-profile", o.withAuth(o.handleGetUserProfile))
+	http.HandleFunc("/orchestrate/get-accounts", o.withAuth(o.handleGetAccounts))
 
 	// Orchestration endpoints - Accounts
-	http.HandleFunc("/orchestrate/get-balance", o.handleGetBalance)
-	http.HandleFunc("/orchestrate/get-statements", o.handleGetStatements)
+	http.HandleFunc("/orchestrate/get-balance", o.withAuth(o.handleGetBalance))
+	http.HandleFunc("/orchestrate/get-statements", o.withAuth(o.handleGetStatements))
 
 	// Orchestration endpoints - Payments
-	http.HandleFunc("/orchestrate/transfer", o.handleTransfer)
+	http.HandleFunc("/orchestrate/transfer", o.withAuth(o.handleTransfer))
 
 	// Orchestration endpoints - Applications
-	http.HandleFunc("/orchestrate/apply-loan", o.handleApplyLoan)
-	http.HandleFunc("/orchestrate/apply-credit-card", o.handleApplyCreditCard)
-	http.HandleFunc("/orchestrate/get-application-status", o.handleGetApplicationStatus)
+	http.HandleFunc("/orchestrate/apply-loan", o.withAuth(o.handleApplyLoan))
+	http.HandleFunc("/orchestrate/apply-credit-card", o.withAuth(o.handleApplyCreditCard))
+	http.HandleFunc("/orchestrate/get-application-status", o.withAuth(o.handleGetApplicationStatus))
 
 	log.Printf("Routes configured")
 }
@@ -118,6 +130,166 @@ func (o *Orchestrator) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status": "healthy", "version": "0.1.0"}`))
+}
+
+// ============================================================================
+// Authentication & Authorization Middleware
+// ============================================================================
+
+// AuthenticatedHandler is a handler that requires authentication
+type AuthenticatedHandler func(http.ResponseWriter, *http.Request, *UserSession)
+
+// withAuth is middleware that validates authentication tokens
+func (o *Orchestrator) withAuth(handler AuthenticatedHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeErrorJSON(w, "Missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract token (Bearer <token>)
+		var token string
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			token = authHeader[7:]
+		} else {
+			writeErrorJSON(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			return
+		}
+
+		// Validate token
+		session, err := o.authService.ValidateToken(token)
+		if err != nil {
+			writeErrorJSON(w, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
+			return
+		}
+
+		// Call handler with session
+		handler(w, r, session)
+	}
+}
+
+// ============================================================================
+// Authentication Handlers
+// ============================================================================
+
+// handleLogin authenticates a user and returns a token
+func (o *Orchestrator) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Phone == "" || req.PIN == "" {
+		writeErrorJSON(w, "Missing phone or PIN", http.StatusBadRequest)
+		return
+	}
+
+	// Authenticate user
+	response, err := o.authService.Login(req.Phone, req.PIN)
+	if err != nil {
+		log.Printf("Login failed for %s: %v", req.Phone, err)
+		writeSuccessJSON(w, http.StatusUnauthorized, response)
+		return
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleLogout revokes a user's token
+func (o *Orchestrator) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get token from Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		writeErrorJSON(w, "Missing Authorization header", http.StatusUnauthorized)
+		return
+	}
+
+	var token string
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	} else {
+		writeErrorJSON(w, "Invalid Authorization header format", http.StatusUnauthorized)
+		return
+	}
+
+	// Logout
+	if err := o.authService.Logout(token); err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Logout failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeSuccessJSON(w, http.StatusOK, map[string]string{"message": "Logout successful"})
+}
+
+// handleRegister creates a new user with sample data
+func (o *Orchestrator) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UserSeedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Phone == "" || req.PIN == "" || req.Name == "" {
+		writeErrorJSON(w, "Missing required fields (phone, PIN, name)", http.StatusBadRequest)
+		return
+	}
+
+	// Register user with sample data
+	response, err := o.authService.RegisterUser(req.Phone, req.PIN, req.Name, req.Email)
+	if err != nil {
+		log.Printf("Registration failed for %s: %v", req.Phone, err)
+		writeSuccessJSON(w, http.StatusConflict, response)
+		return
+	}
+
+	writeSuccessJSON(w, http.StatusCreated, response)
+}
+
+// handleListUsers returns all registered users (for demo purposes)
+func (o *Orchestrator) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	users := o.authService.ListUsers()
+
+	// Convert to response format
+	userList := make([]map[string]interface{}, len(users))
+	for i, user := range users {
+		userList[i] = map[string]interface{}{
+			"user_id":       user.UserID,
+			"phone":         user.Phone,
+			"name":          user.Name,
+			"email":         user.Email,
+			"account_count": len(user.Accounts),
+			"accounts":      user.Accounts,
+			"created_at":    user.CreatedAt,
+		}
+	}
+
+	writeSuccessJSON(w, http.StatusOK, map[string]interface{}{
+		"count": len(userList),
+		"users": userList,
+	})
 }
 
 // ============================================================================
@@ -139,7 +311,7 @@ func (o *Orchestrator) handleAdminCalls(w http.ResponseWriter, r *http.Request) 
 // ============================================================================
 
 // handleGetUser retrieves user information
-func (o *Orchestrator) handleGetUser(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetUser(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -177,7 +349,7 @@ func (o *Orchestrator) handleGetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetUserProfile retrieves user profile
-func (o *Orchestrator) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetUserProfile(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -209,7 +381,7 @@ func (o *Orchestrator) handleGetUserProfile(w http.ResponseWriter, r *http.Reque
 }
 
 // handleGetAccounts retrieves user accounts
-func (o *Orchestrator) handleGetAccounts(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetAccounts(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -251,7 +423,7 @@ func (o *Orchestrator) handleGetAccounts(w http.ResponseWriter, r *http.Request)
 // ============================================================================
 
 // handleLoadContext loads user context for a call
-func (o *Orchestrator) handleLoadContext(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleLoadContext(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -289,7 +461,7 @@ func (o *Orchestrator) handleLoadContext(w http.ResponseWriter, r *http.Request)
 }
 
 // handleGetBalance gets account balance
-func (o *Orchestrator) handleGetBalance(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetBalance(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -328,7 +500,7 @@ func (o *Orchestrator) handleGetBalance(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleGetStatements retrieves account statements
-func (o *Orchestrator) handleGetStatements(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetStatements(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -371,7 +543,7 @@ func (o *Orchestrator) handleGetStatements(w http.ResponseWriter, r *http.Reques
 }
 
 // handleTransfer initiates a fund transfer
-func (o *Orchestrator) handleTransfer(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleTransfer(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -412,7 +584,7 @@ func (o *Orchestrator) handleTransfer(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleApplyLoan initiates a loan application
-func (o *Orchestrator) handleApplyLoan(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleApplyLoan(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -459,7 +631,7 @@ func (o *Orchestrator) handleApplyLoan(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleApplyCreditCard initiates a credit card application
-func (o *Orchestrator) handleApplyCreditCard(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleApplyCreditCard(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -505,7 +677,7 @@ func (o *Orchestrator) handleApplyCreditCard(w http.ResponseWriter, r *http.Requ
 }
 
 // handleGetApplicationStatus retrieves application status
-func (o *Orchestrator) handleGetApplicationStatus(w http.ResponseWriter, r *http.Request) {
+func (o *Orchestrator) handleGetApplicationStatus(w http.ResponseWriter, r *http.Request, session *UserSession) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
