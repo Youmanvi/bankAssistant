@@ -25,38 +25,44 @@ A voice-driven, multi-agent AI banking assistant that handles customer interacti
 - **Node.js 18+** (frontend)
 - **API Keys**: OpenAI, Retell AI, Pinata (optional)
 
-### Quick Start (5 minutes)
+### Quick Start (10 minutes)
 
+**Terminal 1 - Python Backend:**
 ```bash
-# 1. Clone and navigate
-git clone <repo>
-cd bankAssistant
-
-# 2. Set up Python backend
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-# 3. Create environment file
 cp .env.example .env
 # Edit .env with your API keys
-
-# 4. Run backend
 python main.py
 # Backend runs on http://localhost:8000
+```
 
-# 5. In another terminal, set up frontend
+**Terminal 2 - Go Orchestrator:**
+```bash
+cd orchestrator
+cp .env.example .env
+# Edit .env with your API keys
+go run .
+# Orchestrator runs on http://localhost:8001
+```
+
+**Terminal 3 - Next.js Frontend:**
+```bash
 cd frontend
 npm install
 npm run dev
 # Frontend runs on http://localhost:3000
-
-# 6. Check health
-curl http://localhost:8000/health
 ```
 
-**That's it!** Backend and frontend are now running.
+**Verify Installation:**
+```bash
+curl http://localhost:8000/health    # Backend
+curl http://localhost:8001/health    # Orchestrator
+```
+
+**All components running!** You can now test the full system.
 
 ## How It Works
 
@@ -146,6 +152,19 @@ bankAssistant/
 │   ├── main.py                 # FastAPI app entry point
 │   └── requirements.txt        # Python dependencies
 │
+├── orchestrator/               # Go orchestrator service
+│   ├── main.go                 # Entry point
+│   ├── config.go               # Configuration loading
+│   ├── types.go                # Type definitions
+│   ├── call_state_machine.go   # Call lifecycle management
+│   ├── python_client.go        # Python backend HTTP client
+│   ├── retell_handler.go       # Retell webhook handling
+│   ├── orchestrator.go         # Main orchestration service
+│   ├── go.mod                  # Go module definition
+│   ├── .env.example            # Environment template
+│   ├── Dockerfile              # Container image
+│   └── README.md               # Orchestrator guide
+│
 ├── frontend/                   # Next.js React dashboard
 │   ├── src/app/                # Next.js app
 │   ├── src/components/         # React components
@@ -164,6 +183,7 @@ bankAssistant/
 ├── tests/                      # Test suite (unit & integration)
 ├── .env.example                # Environment template
 ├── .gitignore                  # Git ignore rules
+├── docker-compose.yml          # Multi-service orchestration
 └── README.md                   # This file (comprehensive guide)
 ```
 
@@ -180,6 +200,17 @@ bankAssistant/
 - `constants.py` - Configuration constants and enums
 - `config.py` - Environment variable management
 - `main.py` - FastAPI application entry point
+
+**orchestrator/** - Go orchestrator service
+- `main.go` - Entry point and signal handling
+- `config.go` - Configuration loading from environment
+- `types.go` - Type definitions (CallState, RetellPayload, etc.)
+- `call_state_machine.go` - Call lifecycle state management (8 states)
+- `python_client.go` - HTTP client for Python backend REST APIs
+- `retell_handler.go` - Retell webhook receiver and processor
+- `orchestrator.go` - Main orchestration service and HTTP handlers
+- Complete Dockerfile for containerization
+- See `orchestrator/README.md` for full documentation
 
 **frontend/** - Next.js React dashboard
 - Interactive admin interface for monitoring calls
@@ -204,6 +235,12 @@ bankAssistant/
 - **Pydantic** - Data validation
 - **Python 3.10+** - Runtime
 
+### Orchestrator
+- **Go 1.21+** - High-performance statically-typed language
+- **Standard Library** - net/http for HTTP server and client
+- **godotenv** - Environment variable management
+- Concurrent-safe state machine with mutexes
+
 ### Frontend
 - **Next.js** - React framework
 - **TypeScript** - Type safety
@@ -221,8 +258,8 @@ bankAssistant/
 | Component | Role | Technology |
 |-----------|------|-----------|
 | **Retell AI** | Voice provider | Third-party service |
+| **Go Orchestrator** | Webhook handler, call state machine, API orchestration | Go 1.21+ |
 | **Python Backend** | REST API + LLM + agents | FastAPI + OpenAI Swarm |
-| **Go Orchestrator** | Workflow management (TBD) | To be built |
 | **Next.js Frontend** | Admin dashboard | React + TypeScript |
 
 ## REST API Endpoints
