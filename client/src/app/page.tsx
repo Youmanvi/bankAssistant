@@ -111,7 +111,7 @@ export default function AdminDashboard() {
     accounts: {},
     payments: {}
   });
-  const [socket, setSocket] = useState(null)
+  const [socket, setSocket] = useState<WebSocket | null>(null)
   const [userInfo, setUserInfo] = useState<UserInfo>({
     id: "",
     name: "",
