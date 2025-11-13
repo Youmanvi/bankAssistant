@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # Python FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: bankassistant-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - RETELL_API_KEY=${RETELL_API_KEY}
+      - RETELL_API_BASE=${RETELL_API_BASE:-https://api.retellai.com}
+      - PINATA_API_KEY=${PINATA_API_KEY}
+      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - DEBUG=${DEBUG:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend:/app/backend
+    networks:
+      - bankassistant
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Go Orchestrator
+  orchestrator:
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    container_name: bankassistant-orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      - ORCHESTRATOR_HOST=0.0.0.0
+      - ORCHESTRATOR_PORT=8001
+      - RETELL_API_KEY=${RETELL_API_KEY}
+      - PYTHON_BACKEND_URL=http://backend:8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CALL_STATE_DB=${CALL_STATE_DB:-memory}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - bankassistant
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bankassistant-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_ORCHESTRATOR_URL=http://localhost:8001
+    depends_on:
+      - backend
+      - orchestrator
+    networks:
+      - bankassistant
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+networks:
+  bankassistant:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Usage:
+#
+# 1. Create .env file in root directory:
+#    cp .env.example .env
+#    # Edit .env with your API keys
+#
+# 2. Build all services:
+#    docker-compose build
+#
+# 3. Start all services:
+#    docker-compose up
+#
+# 4. View logs:
+#    docker-compose logs -f backend
+#    docker-compose logs -f orchestrator
+#    docker-compose logs -f frontend
+#
+# 5. Stop all services:
+#    docker-compose down
+#
+# 6. Remove volumes (careful - deletes data):
+#    docker-compose down -v
+#
+# Services will be available at:
+# - Backend API: http://localhost:8000
+# - Backend Docs: http://localhost:8000/docs
+# - Orchestrator: http://localhost:8001
+# - Frontend: http://localhost:3000
