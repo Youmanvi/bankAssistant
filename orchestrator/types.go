@@ -59,33 +59,114 @@ type RetellCallData struct {
 // Python Backend API Models
 // ============================================================================
 
-// User represents a user from the Python backend
-type User struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Accounts []string `json:"accounts"`
-	SSN     string   `json:"ssn"`
-	Email   string   `json:"email"`
-	Phone   string   `json:"phone"`
+// UserDetails represents user information from Python backend
+type UserDetails struct {
+	Name         string   `json:"name"`
+	Accounts     []string `json:"accounts"`
+	SSN          string   `json:"ssn"`
+	Email        string   `json:"email"`
+	Phone        string   `json:"phone"`
+	Address      string   `json:"address"`
+	DateOfBirth  string   `json:"date_of_birth"`
 }
 
-// Account represents a bank account from the Python backend
-type Account struct {
-	ID       string             `json:"id"`
-	UserID   string             `json:"user_id"`
-	Balance  float64            `json:"balance"`
-	Type     string             `json:"type"`
+// UserResponse represents the response from GET /api/v1/users/{user_id}
+type UserResponse struct {
+	UserID  string      `json:"user_id"`
+	Details UserDetails `json:"details"`
+}
+
+// UserProfileResponse represents the response from GET /api/v1/users/{user_id}/profile
+type UserProfileResponse struct {
+	UserID  string `json:"user_id"`
+	Name    string `json:"name"`
+	Email   string `json:"email"`
+	Phone   string `json:"phone"`
+	Address string `json:"address"`
+}
+
+// AccountDetails represents account information
+type AccountDetails struct {
+	Balance    float64            `json:"balance"`
+	Type       string             `json:"type"`
+	Statements map[string]string  `json:"statements"`
+}
+
+// AccountResponse represents the response from GET /api/v1/accounts/{account_id}
+type AccountResponse struct {
+	AccountID string         `json:"account_id"`
+	Details   AccountDetails `json:"details"`
+}
+
+// BalanceResponse represents the response from GET /api/v1/accounts/{account_id}/balance
+type BalanceResponse struct {
+	AccountID string  `json:"account_id"`
+	Balance   float64 `json:"balance"`
+}
+
+// StatementsResponse represents the response from GET /api/v1/accounts/{account_id}/statements
+type StatementsResponse struct {
+	AccountID  string            `json:"account_id"`
 	Statements map[string]string `json:"statements"`
 }
 
-// Payment represents a payment transaction
-type Payment struct {
-	ID          string  `json:"id"`
+// UserAccountsResponse represents the response from GET /api/v1/users/{user_id}/accounts
+type UserAccountsResponse struct {
+	UserID       string                    `json:"user_id"`
+	AccountCount int                       `json:"account_count"`
+	Accounts     map[string]AccountDetails `json:"accounts"`
+}
+
+// PaymentResponse represents the response from POST /api/v1/payments/transfer
+type PaymentResponse struct {
+	Status      string  `json:"status"`
+	PaymentID   string  `json:"payment_id"`
 	FromAccount string  `json:"from_account"`
 	ToAccount   string  `json:"to_account"`
 	Amount      float64 `json:"amount"`
-	Date        string  `json:"date"`
-	Status      string  `json:"status"`
+}
+
+// LoanApplicationRequest represents a loan application
+type LoanApplicationRequest struct {
+	UserID      string  `json:"user_id"`
+	LoanAmount  float64 `json:"loan_amount"`
+	LoanPurpose string  `json:"loan_purpose"`
+	TermYears   int     `json:"term_years"`
+}
+
+// LoanApplicationResponse represents the response from POST /api/v1/applications/loan
+type LoanApplicationResponse struct {
+	Status          string  `json:"status"`
+	ApplicationID   string  `json:"application_id"`
+	UserID          string  `json:"user_id"`
+	LoanAmount      float64 `json:"loan_amount"`
+	LoanPurpose     string  `json:"loan_purpose"`
+	TermYears       int     `json:"term_years"`
+	Message         string  `json:"message"`
+}
+
+// CreditCardApplicationRequest represents a credit card application
+type CreditCardApplicationRequest struct {
+	UserID      string  `json:"user_id"`
+	CardType    string  `json:"card_type"`
+	CreditLimit float64 `json:"credit_limit"`
+}
+
+// CreditCardApplicationResponse represents the response from POST /api/v1/applications/credit-card
+type CreditCardApplicationResponse struct {
+	Status        string  `json:"status"`
+	ApplicationID string  `json:"application_id"`
+	UserID        string  `json:"user_id"`
+	CardType      string  `json:"card_type"`
+	CreditLimit   float64 `json:"credit_limit"`
+	Message       string  `json:"message"`
+}
+
+// ApplicationStatusResponse represents the response from GET /api/v1/applications/{application_id}
+type ApplicationStatusResponse struct {
+	ApplicationID string `json:"application_id"`
+	Status        string `json:"status"`
+	Message       string `json:"message"`
 }
 
 // ============================================================================

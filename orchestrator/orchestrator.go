@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 )
@@ -86,10 +88,23 @@ func (o *Orchestrator) setupRoutes() {
 	http.HandleFunc("/admin/calls", o.handleAdminCalls)
 	http.HandleFunc("/admin/call", o.retellHandler.GetCallStatus)
 
-	// Orchestration endpoints
+	// Orchestration endpoints - User & Context
 	http.HandleFunc("/orchestrate/load-context", o.handleLoadContext)
+	http.HandleFunc("/orchestrate/get-user", o.handleGetUser)
+	http.HandleFunc("/orchestrate/get-user-profile", o.handleGetUserProfile)
+	http.HandleFunc("/orchestrate/get-accounts", o.handleGetAccounts)
+
+	// Orchestration endpoints - Accounts
 	http.HandleFunc("/orchestrate/get-balance", o.handleGetBalance)
+	http.HandleFunc("/orchestrate/get-statements", o.handleGetStatements)
+
+	// Orchestration endpoints - Payments
 	http.HandleFunc("/orchestrate/transfer", o.handleTransfer)
+
+	// Orchestration endpoints - Applications
+	http.HandleFunc("/orchestrate/apply-loan", o.handleApplyLoan)
+	http.HandleFunc("/orchestrate/apply-credit-card", o.handleApplyCreditCard)
+	http.HandleFunc("/orchestrate/get-application-status", o.handleGetApplicationStatus)
 
 	log.Printf("Routes configured")
 }
@@ -120,6 +135,118 @@ func (o *Orchestrator) handleAdminCalls(w http.ResponseWriter, r *http.Request) 
 }
 
 // ============================================================================
+// User & Context Orchestration Handlers
+// ============================================================================
+
+// handleGetUser retrieves user information
+func (o *Orchestrator) handleGetUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID string `json:"call_id"`
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		writeErrorJSON(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Get user from Python backend
+	response, err := o.backendClient.GetUser(req.UserID)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to get user: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting user: %v", err)
+		return
+	}
+
+	// Update metadata if call_id provided
+	if req.CallID != "" {
+		o.stateMachine.UpdateMetadata(req.CallID, "user", response)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleGetUserProfile retrieves user profile
+func (o *Orchestrator) handleGetUserProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		writeErrorJSON(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Get user profile from Python backend
+	response, err := o.backendClient.GetUserProfile(req.UserID)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to get user profile: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting user profile: %v", err)
+		return
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleGetAccounts retrieves user accounts
+func (o *Orchestrator) handleGetAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID string `json:"call_id"`
+		UserID string `json:"user_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		writeErrorJSON(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Get accounts from Python backend
+	response, err := o.backendClient.GetUserAccounts(req.UserID)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to get user accounts: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting user accounts: %v", err)
+		return
+	}
+
+	// Update metadata if call_id provided
+	if req.CallID != "" {
+		o.stateMachine.UpdateMetadata(req.CallID, "accounts", response.Accounts)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// ============================================================================
 // Orchestration Handlers
 // ============================================================================
 
@@ -135,29 +262,30 @@ func (o *Orchestrator) handleLoadContext(w http.ResponseWriter, r *http.Request)
 		UserID string `json:"user_id"`
 	}
 
-	if err := parseJSONBody(r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.CallID == "" || req.UserID == "" {
-		http.Error(w, "Missing call_id or user_id", http.StatusBadRequest)
+		writeErrorJSON(w, "Missing call_id or user_id", http.StatusBadRequest)
 		return
 	}
 
 	// Load user context
 	if err := o.retellHandler.LoadUserContext(req.CallID, req.UserID); err != nil {
-		writeError(w, "Failed to load user context", err, http.StatusInternalServerError)
+		writeErrorJSON(w, fmt.Sprintf("Failed to load user context: %v", err), http.StatusInternalServerError)
+		log.Printf("Error loading user context: %v", err)
 		return
 	}
 
 	// Update call state to AWAITING_INTENT
 	if err := o.stateMachine.UpdateState(req.CallID, AwaitingIntent); err != nil {
-		writeError(w, "Failed to update call state", err, http.StatusInternalServerError)
+		writeErrorJSON(w, fmt.Sprintf("Failed to update call state: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "context loaded"})
+	writeSuccessJSON(w, http.StatusOK, map[string]string{"status": "context loaded"})
 }
 
 // handleGetBalance gets account balance
@@ -172,13 +300,13 @@ func (o *Orchestrator) handleGetBalance(w http.ResponseWriter, r *http.Request) 
 		AccountID string `json:"account_id"`
 	}
 
-	if err := parseJSONBody(r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.CallID == "" || req.AccountID == "" {
-		http.Error(w, "Missing call_id or account_id", http.StatusBadRequest)
+		writeErrorJSON(w, "Missing call_id or account_id", http.StatusBadRequest)
 		return
 	}
 
@@ -186,19 +314,60 @@ func (o *Orchestrator) handleGetBalance(w http.ResponseWriter, r *http.Request) 
 	o.stateMachine.UpdateState(req.CallID, ProcessingRequest)
 
 	// Get balance from Python backend
-	balance, err := o.backendClient.GetAccountBalance(req.AccountID)
+	response, err := o.backendClient.GetAccountBalance(req.AccountID)
 	if err != nil {
-		writeError(w, "Failed to get account balance", err, http.StatusInternalServerError)
+		writeErrorJSON(w, fmt.Sprintf("Failed to get account balance: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting account balance: %v", err)
 		return
 	}
 
 	// Update state to GENERATING_RESPONSE
 	o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"account_id": req.AccountID,
-		"balance":    balance,
-	})
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleGetStatements retrieves account statements
+func (o *Orchestrator) handleGetStatements(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID    string `json:"call_id"`
+		AccountID string `json:"account_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AccountID == "" {
+		writeErrorJSON(w, "Missing account_id", http.StatusBadRequest)
+		return
+	}
+
+	// Update state to PROCESSING_REQUEST if call_id provided
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, ProcessingRequest)
+	}
+
+	// Get statements from Python backend
+	response, err := o.backendClient.GetAccountStatements(req.AccountID)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to get account statements: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting account statements: %v", err)
+		return
+	}
+
+	// Update state to GENERATING_RESPONSE
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
 }
 
 // handleTransfer initiates a fund transfer
@@ -215,13 +384,13 @@ func (o *Orchestrator) handleTransfer(w http.ResponseWriter, r *http.Request) {
 		Amount      float64 `json:"amount"`
 	}
 
-	if err := parseJSONBody(r, &req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.CallID == "" || req.FromAccount == "" || req.ToAccount == "" || req.Amount <= 0 {
-		http.Error(w, "Missing or invalid parameters", http.StatusBadRequest)
+		writeErrorJSON(w, "Missing or invalid parameters", http.StatusBadRequest)
 		return
 	}
 
@@ -231,41 +400,170 @@ func (o *Orchestrator) handleTransfer(w http.ResponseWriter, r *http.Request) {
 	// Call Python backend to transfer funds
 	payment, err := o.backendClient.TransferFunds(req.FromAccount, req.ToAccount, req.Amount)
 	if err != nil {
-		writeError(w, "Failed to transfer funds", err, http.StatusInternalServerError)
+		writeErrorJSON(w, fmt.Sprintf("Failed to transfer funds: %v", err), http.StatusInternalServerError)
+		log.Printf("Error transferring funds: %v", err)
 		return
 	}
 
 	// Update state to GENERATING_RESPONSE
 	o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
 
-	writeJSON(w, http.StatusOK, payment)
+	writeSuccessJSON(w, http.StatusOK, payment)
+}
+
+// handleApplyLoan initiates a loan application
+func (o *Orchestrator) handleApplyLoan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID      string  `json:"call_id"`
+		UserID      string  `json:"user_id"`
+		LoanAmount  float64 `json:"loan_amount"`
+		LoanPurpose string  `json:"loan_purpose"`
+		TermYears   int     `json:"term_years"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.LoanAmount <= 0 || req.TermYears <= 0 {
+		writeErrorJSON(w, "Missing or invalid parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Update state to PROCESSING_REQUEST
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, ProcessingRequest)
+	}
+
+	// Call Python backend to apply for loan
+	response, err := o.backendClient.ApplyForLoan(req.UserID, req.LoanAmount, req.LoanPurpose, req.TermYears)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to apply for loan: %v", err), http.StatusInternalServerError)
+		log.Printf("Error applying for loan: %v", err)
+		return
+	}
+
+	// Update state to GENERATING_RESPONSE
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
+		o.stateMachine.UpdateMetadata(req.CallID, "application_id", response.ApplicationID)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleApplyCreditCard initiates a credit card application
+func (o *Orchestrator) handleApplyCreditCard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID      string  `json:"call_id"`
+		UserID      string  `json:"user_id"`
+		CardType    string  `json:"card_type"`
+		CreditLimit float64 `json:"credit_limit"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.CreditLimit <= 0 {
+		writeErrorJSON(w, "Missing or invalid parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Update state to PROCESSING_REQUEST
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, ProcessingRequest)
+	}
+
+	// Call Python backend to apply for credit card
+	response, err := o.backendClient.ApplyForCreditCard(req.UserID, req.CardType, req.CreditLimit)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to apply for credit card: %v", err), http.StatusInternalServerError)
+		log.Printf("Error applying for credit card: %v", err)
+		return
+	}
+
+	// Update state to GENERATING_RESPONSE
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
+		o.stateMachine.UpdateMetadata(req.CallID, "application_id", response.ApplicationID)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
+}
+
+// handleGetApplicationStatus retrieves application status
+func (o *Orchestrator) handleGetApplicationStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CallID        string `json:"call_id"`
+		ApplicationID string `json:"application_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ApplicationID == "" {
+		writeErrorJSON(w, "Missing application_id", http.StatusBadRequest)
+		return
+	}
+
+	// Update state to PROCESSING_REQUEST
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, ProcessingRequest)
+	}
+
+	// Get application status from Python backend
+	response, err := o.backendClient.GetApplicationStatus(req.ApplicationID)
+	if err != nil {
+		writeErrorJSON(w, fmt.Sprintf("Failed to get application status: %v", err), http.StatusInternalServerError)
+		log.Printf("Error getting application status: %v", err)
+		return
+	}
+
+	// Update state to GENERATING_RESPONSE
+	if req.CallID != "" {
+		o.stateMachine.UpdateState(req.CallID, GeneratingResponse)
+	}
+
+	writeSuccessJSON(w, http.StatusOK, response)
 }
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-// parseJSONBody parses JSON from request body
-func parseJSONBody(r *http.Request, v interface{}) error {
-	return parseJSON(r.Body, v)
-}
-
-// parseJSON parses JSON from an io.Reader
-func parseJSON(reader interface{}, v interface{}) error {
-	// For now, use standard decoder
-	// This is a placeholder for more robust error handling
-	return nil
-}
-
-// writeJSON writes a JSON response
-func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
+// writeSuccessJSON writes a successful JSON response
+func writeSuccessJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(data)
 }
 
-// writeError writes an error response
-func writeError(w http.ResponseWriter, message string, err error, statusCode int) {
-	log.Printf("%s: %v", message, err)
+// writeErrorJSON writes an error JSON response
+func writeErrorJSON(w http.ResponseWriter, message string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error":  message,
+		"status": statusCode,
+	})
 }

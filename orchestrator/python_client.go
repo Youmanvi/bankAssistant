@@ -35,86 +35,115 @@ func NewPythonBackendClient(baseURL string) *PythonBackendClient {
 // ============================================================================
 
 // GetUser retrieves user information from the Python backend
-func (c *PythonBackendClient) GetUser(userID string) (*User, error) {
+func (c *PythonBackendClient) GetUser(userID string) (*UserResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/users/%s", c.baseURL, userID)
 
 	body, err := c.makeRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
-	var user User
-	if err := json.Unmarshal(body, &user); err != nil {
+	var response UserResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		log.Printf("Error unmarshaling user response: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal user response: %w", err)
 	}
 
-	return &user, nil
+	return &response, nil
+}
+
+// GetUserProfile retrieves user profile from the Python backend
+func (c *PythonBackendClient) GetUserProfile(userID string) (*UserProfileResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/users/%s/profile", c.baseURL, userID)
+
+	body, err := c.makeRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user profile: %w", err)
+	}
+
+	var response UserProfileResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error unmarshaling user profile response: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal user profile response: %w", err)
+	}
+
+	return &response, nil
 }
 
 // GetUserAccounts retrieves user accounts from the Python backend
-func (c *PythonBackendClient) GetUserAccounts(userID string) ([]*Account, error) {
+func (c *PythonBackendClient) GetUserAccounts(userID string) (*UserAccountsResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/users/%s/accounts", c.baseURL, userID)
 
 	body, err := c.makeRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user accounts: %w", err)
 	}
 
-	var accounts []*Account
-	if err := json.Unmarshal(body, &accounts); err != nil {
+	var response UserAccountsResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		log.Printf("Error unmarshaling accounts response: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal accounts response: %w", err)
 	}
 
-	return accounts, nil
+	return &response, nil
 }
 
 // ============================================================================
 // Account API Calls
 // ============================================================================
 
-// GetAccountBalance retrieves account balance from the Python backend
-func (c *PythonBackendClient) GetAccountBalance(accountID string) (float64, error) {
+// GetAccount retrieves full account information from the Python backend
+func (c *PythonBackendClient) GetAccount(accountID string) (*AccountResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/accounts/%s", c.baseURL, accountID)
 
 	body, err := c.makeRequest("GET", url, nil)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
 
-	var account Account
-	if err := json.Unmarshal(body, &account); err != nil {
+	var response AccountResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		log.Printf("Error unmarshaling account response: %v", err)
-		return 0, err
+		return nil, fmt.Errorf("failed to unmarshal account response: %w", err)
 	}
 
-	return account.Balance, nil
+	return &response, nil
+}
+
+// GetAccountBalance retrieves account balance from the Python backend
+func (c *PythonBackendClient) GetAccountBalance(accountID string) (*BalanceResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/accounts/%s/balance", c.baseURL, accountID)
+
+	body, err := c.makeRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account balance: %w", err)
+	}
+
+	var response BalanceResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error unmarshaling balance response: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal balance response: %w", err)
+	}
+
+	return &response, nil
 }
 
 // GetAccountStatements retrieves account statements from the Python backend
-func (c *PythonBackendClient) GetAccountStatements(accountID, month string) (map[string]string, error) {
+func (c *PythonBackendClient) GetAccountStatements(accountID string) (*StatementsResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/accounts/%s/statements", c.baseURL, accountID)
 
 	body, err := c.makeRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get account statements: %w", err)
 	}
 
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
+	var response StatementsResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		log.Printf("Error unmarshaling statements response: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal statements response: %w", err)
 	}
 
-	statements := make(map[string]string)
-	if stmts, ok := data["statements"].(map[string]interface{}); ok {
-		for k, v := range stmts {
-			statements[k] = fmt.Sprintf("%v", v)
-		}
-	}
-
-	return statements, nil
+	return &response, nil
 }
 
 // ============================================================================
@@ -122,7 +151,7 @@ func (c *PythonBackendClient) GetAccountStatements(accountID, month string) (map
 // ============================================================================
 
 // TransferFunds initiates a payment transfer via the Python backend
-func (c *PythonBackendClient) TransferFunds(fromAccount, toAccount string, amount float64) (*Payment, error) {
+func (c *PythonBackendClient) TransferFunds(fromAccount, toAccount string, amount float64) (*PaymentResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/payments/transfer", c.baseURL)
 
 	payload := map[string]interface{}{
@@ -133,16 +162,87 @@ func (c *PythonBackendClient) TransferFunds(fromAccount, toAccount string, amoun
 
 	body, err := c.makeRequest("POST", url, payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to transfer funds: %w", err)
 	}
 
-	var payment Payment
-	if err := json.Unmarshal(body, &payment); err != nil {
+	var response PaymentResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		log.Printf("Error unmarshaling payment response: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal payment response: %w", err)
 	}
 
-	return &payment, nil
+	return &response, nil
+}
+
+// ============================================================================
+// Application API Calls
+// ============================================================================
+
+// ApplyForLoan initiates a loan application via the Python backend
+func (c *PythonBackendClient) ApplyForLoan(userID string, loanAmount float64, loanPurpose string, termYears int) (*LoanApplicationResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/applications/loan", c.baseURL)
+
+	payload := map[string]interface{}{
+		"user_id":      userID,
+		"loan_amount":  loanAmount,
+		"loan_purpose": loanPurpose,
+		"term_years":   termYears,
+	}
+
+	body, err := c.makeRequest("POST", url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply for loan: %w", err)
+	}
+
+	var response LoanApplicationResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error unmarshaling loan application response: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal loan application response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// ApplyForCreditCard initiates a credit card application via the Python backend
+func (c *PythonBackendClient) ApplyForCreditCard(userID, cardType string, creditLimit float64) (*CreditCardApplicationResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/applications/credit-card", c.baseURL)
+
+	payload := map[string]interface{}{
+		"user_id":      userID,
+		"card_type":    cardType,
+		"credit_limit": creditLimit,
+	}
+
+	body, err := c.makeRequest("POST", url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply for credit card: %w", err)
+	}
+
+	var response CreditCardApplicationResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error unmarshaling credit card application response: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal credit card application response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetApplicationStatus retrieves the status of an application
+func (c *PythonBackendClient) GetApplicationStatus(applicationID string) (*ApplicationStatusResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/applications/%s", c.baseURL, applicationID)
+
+	body, err := c.makeRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application status: %w", err)
+	}
+
+	var response ApplicationStatusResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("Error unmarshaling application status response: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal application status response: %w", err)
+	}
+
+	return &response, nil
 }
 
 // ============================================================================
